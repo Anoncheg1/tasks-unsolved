@@ -1,0 +1,56 @@
+* yandex_mlcup2023
+** weather prediction
+- it has torch.utils.data.Dataset implementation (no comments in code)
+- h5py format used as data storage (dev-python/h5py package)
+- interesting example of using h5py list of files as training data
+- interesing approach to update dictinary: dcit1 = {**dict1, **dict2}
+- interestict approach of creating dictionary: dict(map(lambda x: (x,x), source))
+- PersistantModel as Dummy or zero model.
+- target device used as x = x.to(device=self.model.conv.weight.device) of inner model
+- Lightning training framework with pytorch.loggers.TensorBoardLogger
+- Seq2Seq model with ConvLSTM
+*** PersistantModel
+#+begin_src python :results output
+import torch
+import torch.nn as nn
+
+class PersistantModel(nn.Module):
+
+    def __init__(self, out_seq_len=12):
+        super().__init__()
+        self.out_seq_len = out_seq_len
+
+    def forward(self, X):
+        output = torch.stack([X[:, -1] for _ in range(self.out_seq_len)], dim=1)
+        return output
+
+#+end_src
+** neuroswipe - recommend or predict word by first letters
+- it uses very strange jsonl format for data.
+- heapq without Heapify conversion to priority queue.
+
+it has dataset with two temporal sequences in JSON format.
+
+uses DTW (tslearn.metrics.dtw) and ts_dtw (unknown) - measuring
+ similarity between two temporal sequences, which may vary in speed,
+ any data that can be turned into a one-dimensional sequence can be
+ analyzed with DTW.
+
+
+advertize:
+
+- tslearn - builds on (and hence depends on) *scikit-learn*, *numpy*
+ and *scipy* libraries. Machine learning tools for the analysis of time series.
+
+** recom-sys - detect music genre
+Data of target in CSV, pd.read_csv used to read. Music embeddings in
+ numpy compatible format, numpy.load used to read.
+
+all tracks of fixed lenght, embeddings of size 768 dtype = np.float32.
+
+nice "glob" library usage to list files in dictionary with tqdm:
+: for fn in tqdm(glob('track_embeddings/*')):
+
+binary cross entropy loss (BCE) is used as loss function.
+- BCEWithLogitsLoss it is sigmoid of your final neural network layer
+ with BCE at same time, it is more more numerically stable.

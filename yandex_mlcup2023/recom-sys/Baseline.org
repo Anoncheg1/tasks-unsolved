@@ -1,0 +1,266 @@
+#+begin_src python :results output :exports both :session s1
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn as nn
+from tqdm import tqdm
+from datetime import datetime
+from torch.utils.data import Dataset, DataLoader
+from glob import glob
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+CUDA_DEV = 0
+NUM_TAGS = 256
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+df_train = pd.read_csv('train.csv')
+df_test = pd.read_csv('test.csv')
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+track_idx2embeds = {}
+for fn in tqdm(glob('track_embeddings/*')):
+    track_idx = int(fn.split('/')[1].split('.')[0])
+    embeds = np.load(fn)
+    track_idx2embeds[track_idx] = embeds
+#+end_src
+
+#+RESULTS:
+: 100%|███████████████████████████████████████████████████████████████████████████████████████████| 76714/76714 [00:34<00:00, 2235.27it/s]
+
+
+#+begin_src python :results output :exports both :session s1
+class TaggingDataset(Dataset):
+    def __init__(self, df, testing=False):
+        self.df = df
+        self.testing = testing
+        
+    def __len__(self):
+        return self.df.shape[0]
+
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        track_idx = row.track
+        embeds = track_idx2embeds[track_idx]
+        if self.testing:
+            return track_idx, embeds
+        tags = [int(x) for x in row.tags.split(',')]
+        target = np.zeros(NUM_TAGS)
+        target[tags] = 1
+        return track_idx, embeds, target
+
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+train_dataset = TaggingDataset(df_train)
+test_dataset = TaggingDataset(df_test, True)
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+class Network(nn.Module):
+    def __init__(
+        self,
+        num_classes = NUM_TAGS,
+        input_dim = 768,
+        hidden_dim = 512
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.bn = nn.LayerNorm(hidden_dim)
+        self.projector =  nn.Linear(input_dim, hidden_dim)
+        self.lin = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim)
+        )
+        self.fc = nn.Linear(hidden_dim, num_classes)
+        
+
+    def forward(self, embeds):
+        x = [self.projector(x) for x in embeds]
+        x = [v.mean(0).unsqueeze(0) for v in x]
+        x = self.bn(torch.cat(x, dim = 0))
+        x = self.lin(x)
+        outs = self.fc(x)
+        return outs
+
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+def train_epoch(model, loader, criterion, optimizer):
+    model.train()
+    running_loss = None
+    alpha = 0.8
+    for iteration,data in enumerate(loader):
+        optimizer.zero_grad()
+        track_idxs, embeds, target = data
+        embeds = [x.to(CUDA_DEV) for x in embeds]
+        target = target.to(CUDA_DEV)
+        pred_logits = model(embeds)
+        pred_probs = torch.sigmoid(pred_logits)
+        ce_loss = criterion(pred_logits, target)
+        ce_loss.backward()
+        optimizer.step()
+        
+        if running_loss is None:
+            running_loss = ce_loss.item()
+        else:
+            running_loss = alpha * ce_loss.item() + (1 - alpha) * ce_loss.item()
+        if iteration % 100 == 0:
+            print('   {} batch {} loss {}'.format(
+                datetime.now(), iteration + 1, running_loss
+            ))
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+def predict(model, loader):
+    model.eval()
+    track_idxs = []
+    predictions = []
+    with torch.no_grad():
+        for data in loader:
+            track_idx, embeds = data
+            embeds = [x.to(CUDA_DEV) for x in embeds]
+            pred_logits = model(embeds)
+            pred_probs = torch.sigmoid(pred_logits)
+            predictions.append(pred_probs.cpu().numpy())
+            track_idxs.append(track_idx.numpy())
+    predictions = np.vstack(predictions)
+    track_idxs = np.vstack(track_idxs).ravel()
+    return track_idxs, predictions
+            
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+def collate_fn(b):
+    track_idxs = torch.from_numpy(np.vstack([x[0] for x in b]))
+    embeds = [torch.from_numpy(x[1]) for x in b]
+    targets = np.vstack([x[2] for x in b])
+    targets = torch.from_numpy(targets)
+    return track_idxs, embeds, targets
+
+def collate_fn_test(b):
+    track_idxs = torch.from_numpy(np.vstack([x[0] for x in b]))
+    embeds = [torch.from_numpy(x[1]) for x in b]
+    return track_idxs, embeds
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True, collate_fn=collate_fn)
+test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=False, collate_fn=collate_fn_test)
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+model = Network()
+criterion = nn.BCEWithLogitsLoss()
+
+epochs = 5
+model = model.to(CUDA_DEV)
+criterion = criterion.to(CUDA_DEV)
+optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
+
+for epoch in tqdm(range(epochs)):
+    train_epoch(model, train_dataloader, criterion, optimizer)
+
+#+end_src
+
+#+RESULTS:
+:   0%|                                                                                                             | 0/5 [00:00<?, ?it/s]
+
+#+RESULTS:11_1
+:    2023-10-18 14:44:16.531065 batch 1 loss 0.7075236743025073
+:    2023-10-18 14:44:19.635338 batch 101 loss 0.061150574771176025
+:    2023-10-18 14:44:22.648454 batch 201 loss 0.06005757680158297
+:    2023-10-18 14:44:25.647729 batch 301 loss 0.05305281765681258
+:    2023-10-18 14:44:28.865557 batch 401 loss 0.049346572020205315
+:    2023-10-18 14:44:32.195140 batch 501 loss 0.057245233538916196
+:    2023-10-18 14:44:35.263436 batch 601 loss 0.05244400113768144
+:    2023-10-18 14:44:38.268890 batch 701 loss 0.05683685487486079
+
+
+#+RESULTS:11_2
+:  20%|████████████████████▏                                                                                | 1/5 [00:24<01:39, 24.89s/it]
+
+#+RESULTS:11_3
+:    2023-10-18 14:44:41.407519 batch 1 loss 0.051108709063606206
+:    2023-10-18 14:44:44.591685 batch 101 loss 0.05333008464301092
+:    2023-10-18 14:44:47.672684 batch 201 loss 0.048615851497457285
+:    2023-10-18 14:44:50.802449 batch 301 loss 0.0583331023006981
+:    2023-10-18 14:44:53.968967 batch 401 loss 0.05178474290641466
+:    2023-10-18 14:44:57.164127 batch 501 loss 0.05326607791981397
+:    2023-10-18 14:45:00.310902 batch 601 loss 0.052663159237691326
+:    2023-10-18 14:45:03.410570 batch 701 loss 0.04468915274223273
+
+
+#+RESULTS:11_4
+:  40%|████████████████████████████████████████▍                                                            | 2/5 [00:49<01:15, 25.00s/it]
+
+#+RESULTS:11_5
+:    2023-10-18 14:45:06.484146 batch 1 loss 0.04721943227215725
+:    2023-10-18 14:45:09.541661 batch 101 loss 0.050256302482861726
+:    2023-10-18 14:45:12.575161 batch 201 loss 0.05486756705535234
+:    2023-10-18 14:45:15.564876 batch 301 loss 0.049959886820693106
+:    2023-10-18 14:45:18.597967 batch 401 loss 0.05274463129892182
+:    2023-10-18 14:45:21.635723 batch 501 loss 0.04564777213306273
+:    2023-10-18 14:45:24.656053 batch 601 loss 0.04729849403013675
+:    2023-10-18 14:45:27.692837 batch 701 loss 0.04419671735428721
+
+
+#+RESULTS:11_6
+:  60%|████████████████████████████████████████████████████████████▌                                        | 3/5 [01:14<00:49, 24.65s/it]
+
+#+RESULTS:11_7
+:    2023-10-18 14:45:30.730044 batch 1 loss 0.04981377498281575
+:    2023-10-18 14:45:33.805331 batch 101 loss 0.04552920163440567
+:    2023-10-18 14:45:36.847583 batch 201 loss 0.04601334920829567
+:    2023-10-18 14:45:40.143551 batch 301 loss 0.044677905001484636
+:    2023-10-18 14:45:43.349172 batch 401 loss 0.04973384967735042
+:    2023-10-18 14:45:46.447115 batch 501 loss 0.04973694900626728
+:    2023-10-18 14:45:49.506476 batch 601 loss 0.04558426338107989
+:    2023-10-18 14:45:52.578888 batch 701 loss 0.04347101551451775
+
+
+#+RESULTS:11_8
+:  80%|████████████████████████████████████████████████████████████████████████████████▊                    | 4/5 [01:39<00:24, 24.79s/it]
+
+#+RESULTS:11_9
+:    2023-10-18 14:45:55.722427 batch 1 loss 0.045827866771364995
+:    2023-10-18 14:45:59.347741 batch 101 loss 0.05284176830913666
+:    2023-10-18 14:46:03.010142 batch 201 loss 0.04611076906422269
+:    2023-10-18 14:46:06.190025 batch 301 loss 0.04525545036523977
+:    2023-10-18 14:46:09.216547 batch 401 loss 0.04345847934989745
+:    2023-10-18 14:46:12.213595 batch 501 loss 0.0521099605665411
+:    2023-10-18 14:46:15.181224 batch 601 loss 0.04785939400439373
+:    2023-10-18 14:46:18.164844 batch 701 loss 0.045106463558975664
+
+
+#+RESULTS:11_10
+: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 5/5 [02:04<00:00, 24.93s/it]
+
+
+#+begin_src python :results output :exports both :session s1
+track_idxs, predictions = predict(model, test_dataloader)
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+predictions_df = pd.DataFrame([
+    {'track': track, 'prediction': ','.join([str(p) for p in probs])}
+    for track, probs in zip(track_idxs, predictions)
+])
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+predictions_df.to_csv('prediction.csv', index=False)
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+
+#+end_src
+
+#+begin_src python :results output :exports both :session s1
+
+#+end_src
+
