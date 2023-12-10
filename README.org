@@ -1,3 +1,4 @@
+- [[task_for_green/README_green.org]] Regression analysis for freight broker.
 * yandex_mlcup2023
 ** weather prediction
 - it has torch.utils.data.Dataset implementation (no comments in code)
@@ -31,7 +32,7 @@ class PersistantModel(nn.Module):
 
 it has dataset with two temporal sequences in JSON format.
 
-uses DTW (tslearn.metrics.dtw) and ts_dtw (unknown) - measuring
+uses Dynamic time warping (DTW) (tslearn.metrics.dtw) and ts_dtw (unknown) - measuring
  similarity between two temporal sequences, which may vary in speed,
  any data that can be turned into a one-dimensional sequence can be
  analyzed with DTW.
