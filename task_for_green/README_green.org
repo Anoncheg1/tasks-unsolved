@@ -1,9 +1,6 @@
 * task
 Homework to be completed by Monday, December 11, 2023.
 https://github.com/GreenScreens-company/GS-homework
-contacts *TODO: remove it!*
-- konstantin.bondarev@greenscreens.ai
-- valentina.rodina@greenscreens.ai
 
 You should predict rate per mile "rate".
 1) we are expecting loss less than 9%. zero point - 34.85%
@@ -100,14 +97,14 @@ if __name__ == "__main__":
 : Name: rate, dtype: float64
 : Accuracy of validation is 34.85%
 
-* explore dataset
+* exploration of dataset
 - train	2019-11-10 - 2022-09-05
 - test		2022-09-22 - 2022-10-14
 - valid	2022-09-05 - 2022-09-22
 
 I think origin_kma and destination_kma codes is generated randomly
  without meaning.
-** explore fast
+** fast EDA
 #+begin_src python :results output :exports both :session s1
 import pandas as pd
 import numpy as np
@@ -230,7 +227,7 @@ others count: 130
 Name: origin_kma, Length: 296727, dtype: object
 #+end_example
 
-** skewness
+** skewness analysis
 #+begin_src python :results output :exports both :session s1
 import pandas as pd
 import numpy as np
