@@ -1,4 +1,4 @@
-- [[task_for_green/README_green.org]] Regression analysis for freight broker.
+- [[task_for_green/README_green.org]] Regression analysis for freight broker. (10/12/23)
 * yandex_mlcup2023
 ** weather prediction
 - it has torch.utils.data.Dataset implementation (no comments in code)
